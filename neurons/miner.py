@@ -26,9 +26,11 @@ import time
 import argparse
 import traceback
 import bittensor as bt
+from copy import deepcopy
 
 # import this repo
-import template
+import proof.cryptography as cryptography
+import proof.protocol as protocol
 
 def get_config():
     # Step 2: Set up the configuration parser
@@ -110,10 +112,10 @@ def main( config ):
         # The synapse is instead contructed via the headers of the request. It is important to blacklist
         # requests before they are deserialized to avoid wasting resources on requests that will be ignored.
         # Below: Check that the hotkey is a registered entity in the metagraph.
-        if synapse.dendrite.hotkey not in metagraph.hotkeys:
-            # Ignore requests from unrecognized entities.
-            bt.logging.trace(f'Blacklisting unrecognized hotkey {synapse.dendrite.hotkey}')
-            return True
+        # if synapse.dendrite.hotkey not in metagraph.hotkeys:
+        #     # Ignore requests from unrecognized entities.
+        #     bt.logging.trace(f'Blacklisting unrecognized hotkey {synapse.dendrite.hotkey}')
+        #     return True
         # TODO(developer): In practice it would be wise to blacklist requests from entities that 
         # are not validators, or do not have enough stake. This can be checked via metagraph.S
         # and metagraph.validator_permit. You can always attain the uid of the sender via a
@@ -131,19 +133,52 @@ def main( config ):
         # that the request should be processed first. Lower values indicate that the
         # request should be processed later.
         # Below: simple logic, prioritize requests from entities with more stake.
-        caller_uid = metagraph.hotkeys.index( synapse.dendrite.hotkey ) # Get the caller index.
-        prirority = float( metagraph.S[ caller_uid ] ) # Return the stake as the priority.
-        bt.logging.trace(f'Prioritizing {synapse.dendrite.hotkey} with value: ', prirority)
+        # caller_uid = metagraph.hotkeys.index( synapse.dendrite.hotkey ) # Get the caller index.
+        # prirority = float( metagraph.S[ caller_uid ] ) # Return the stake as the priority.
+        # bt.logging.trace(f'Prioritizing {synapse.dendrite.hotkey} with value: ', prirority)
+        priority = 0.0
         return prirority
 
-    # This is the core miner function, which decides the miner's response to a valid, high-priority request.
-    def dummy( synapse: template.protocol.Dummy ) -> template.protocol.Dummy:
-        # TODO(developer): Define how miners should process requests.
-        # This function runs after the synapse has been deserialized (i.e. after synapse.data is available).
-        # This function runs after the blacklist and priority functions have been called.
-        # Below: simple template logic: return the input value multiplied by 2.
-        # If you change this, your miner will lose emission in the network incentive landscape.
-        synapse.dummy_output = synapse.dummy_input * 2
+    def store( synapse: proof.protocol.Store ) -> proof.protocol.Store:
+        # Check content_hash against the content
+        local_content_hash = cryptography.hash( synapse.content )
+        # If it matches, check the signature against the pubkey
+        if synapse.content_hash == local_content_hash:
+            if cryptography.verify( synapse.content, synapse.signature, synapse.pubkey ):
+                # # If it matches, generate a signature of the content signed with the miner key
+                # store the content has as key and the (miner_signature, pubkey) pairs in the database
+                miner_signature, miner_pubkey = cryptography.sign_content_with_new_keypair( synapse.content_hash )
+                self.registry[ synapse.content_hash ] = ( miner_signature, miner_pubkey )
+                stored = True
+                # Optimistically store (no need to send back the signature until verify step)
+            else:
+                # If it doesn't match, return an error. Attempted to store invalid content.
+                verified = False
+                raise ValueError("Signature is not valid with provided pubkey!")
+        else:
+            # If it doesn't match, return an error.
+            verified = False
+            raise ValueError("Content hash not found in registry!")
+        # return the filled synapse
+        synapse.stored = stored
+        return synapse
+
+    def retrieve( synapse: proof.protocol.Retrieve ) -> proof.protocol.Retrieve:
+        if synapse.content_hash in self.registry:
+            # If the content has is in the database, check the signature against the pubkey
+            miner_signature, miner_pubkey = self.registry[ synapse.content_hash ]
+            in_registry = True
+        else:
+            # If it isn't, return 
+            miner_signature = None
+            miner_pubkey = None
+            in_registry = False
+        # Fill values
+        # TODO: Validator will use this to verify after receiving the filled synapse
+        synapse.miner_signature = miner_signature
+        synapse.miner_pubkey = miner_pubkey
+        synapse.in_registry = in_registry
+        # return the filled synapse
         return synapse
 
     # Step 5: Build and link miner functions to the axon.
