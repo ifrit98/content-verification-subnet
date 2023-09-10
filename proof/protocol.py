@@ -18,6 +18,7 @@
 # DEALINGS IN THE SOFTWARE.
 
 import typing
+import pydantic
 import bittensor as bt
 
 

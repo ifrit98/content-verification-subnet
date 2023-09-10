@@ -27,34 +27,6 @@ def hash512(content: str) -> str:
     return hashlib.sha512(content.encode()).hexdigest()
 
 
-def generate_keypair(name: str, email: str, passphrase: str) -> pgpy.PGPKey:
-    """
-    Generate a PGP keypair.
-
-    Args:
-    - name (str): The name associated with the key.
-    - email (str): The email associated with the key.
-    - passphrase (str): The passphrase to protect the private key.
-
-    Returns:
-    - pgpy.PGPKey: The generated key.
-    """
-    # Generate a primary key
-    key = pgpy.PGPKey.new(PubKeyAlgorithm.RSAEncryptOrSign, 4096)
-
-    # Add a user ID to the key
-    uid = pgpy.PGPUID.new(name, email=email)
-    key.add_uid(uid, usage={KeyFlags.Sign, KeyFlags.EncryptCommunications, KeyFlags.EncryptStorage},
-                hashes=[HashAlgorithm.SHA256, HashAlgorithm.SHA512],
-                ciphers=[SymmetricKeyAlgorithm.AES256, SymmetricKeyAlgorithm.AES128],
-                compression=[CompressionAlgorithm.ZLIB, CompressionAlgorithm.ZIP, CompressionAlgorithm.Uncompressed])
-
-    # Protect the key with the passphrase
-    key.protect(passphrase, SymmetricKeyAlgorithm.AES256, HashAlgorithm.SHA256)
-
-    return key
-
-
 def sign_content_with_new_keypair(content: str, passphrase: str = None, seed: int = 1337) -> (str, str):
     """
     Sign the content using the private key.
@@ -205,6 +177,6 @@ def verify_gnupg(signature: str, content: str, pubkey: str) -> bool:
     raise NotImplementedError
 
 
-sign = sign_content
+sign = sign_content_with_new_keypair
 verify = verify_pgpy_with_content
 hash = hash256
