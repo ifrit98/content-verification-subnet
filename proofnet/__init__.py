@@ -17,38 +17,13 @@
 # OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 
-import typing
-import pydantic
-import bittensor as bt
+# TODO(developer): Change this value when updating your code base.
+# Define the version of the template module.
+__version__ = "0.0.0"
+version_split = __version__.split(".")
+__spec_version__ = (1000 * int(version_split[0])) + (10 * int(version_split[1])) + (1 * int(version_split[2]))
 
-
-class Store(bt.Synapse):
-    class Config:
-        validate_assignment = True
-
-    def deserialize(self) -> str:
-        return self.zk_proof
-
-    # Query values
-    content: typing.Optional[object] = pydantic.Field(..., allow_mutation=False)
-    content_hash: str = pydantic.Field(..., allow_mutation=False)
-    pubkey: str = pydantic.Field(..., allow_mutation=False)
-    signature: str = pydantic.Field(..., allow_mutation=False)
-
-    # Return values
-    verified: typing.Optional[str] = ''
-
-class Retrieve(bt.Synapse):
-    class Config:
-        validate_assignment = True
-
-    def deserialize(self) -> str:
-        return self.verified
-
-    # Query values
-    content_hash: str = pydantic.Field(..., allow_mutation=False)
-
-    # Return values
-    in_registry: typing.Optional[bool] = False
-    miner_signature: typing.Optional[str] = ''
-    miner_pubkey: typing.Optional[str] = ''
+# Import all submodules.
+from . import protocol
+from . import cryptography
+from . import errors

@@ -29,8 +29,10 @@ import bittensor as bt
 from copy import deepcopy
 
 # import this repo
-import proof.cryptography as cryptography
-import proof.protocol as protocol
+import proofnet.cryptography as cryptography
+import proofnet.protocol as protocol
+import proofnet.errors as errors
+
 
 def get_config():
     # Step 2: Set up the configuration parser
@@ -142,26 +144,34 @@ def main( config ):
     def store( synapse: proof.protocol.Store ) -> proof.protocol.Store:
         # Check content_hash against the content
         local_content_hash = cryptography.hash( synapse.content )
-        # If it matches, check the signature against the pubkey
-        if synapse.content_hash == local_content_hash:
-            if cryptography.verify( synapse.content, synapse.signature, synapse.pubkey ):
-                # # If it matches, generate a signature of the content signed with the miner key
-                # store the content has as key and the (miner_signature, pubkey) pairs in the database
-                miner_signature, miner_pubkey = cryptography.sign_content_with_new_keypair( synapse.content_hash )
-                self.registry[ synapse.content_hash ] = ( miner_signature, miner_pubkey )
-                stored = True
-                # Optimistically store (no need to send back the signature until verify step)
+        try:
+            # If it matches, check the signature against the pubkey
+            if synapse.content_hash == local_content_hash:
+                if cryptography.verify( synapse.content, synapse.signature, synapse.pubkey ):
+                    # # If it matches, generate a signature of the content signed with the miner key
+                    # store the content has as key and the (miner_signature, pubkey) pairs in the database
+                    miner_signature, miner_pubkey = cryptography.sign_content_with_new_keypair( synapse.content_hash )
+                    self.registry[ synapse.content_hash ] = ( miner_signature, miner_pubkey )
+                    stored = True
+                    # Optimistically store (no need to send back the signature until verify step)
+                else:
+                    # If it doesn't match, return an error. Attempted to store invalid content.
+                    stored = False
+                    raise SignatureMismatchError("Signature is not valid with provided pubkey!")
             else:
-                # If it doesn't match, return an error. Attempted to store invalid content.
-                verified = False
-                raise ValueError("Signature is not valid with provided pubkey!")
-        else:
-            # If it doesn't match, return an error.
-            verified = False
-            raise ValueError("Content hash not found in registry!")
-        # return the filled synapse
-        synapse.stored = stored
-        return synapse
+                # If it doesn't match, return an error.
+                stored = False
+                raise ContentHashMismatchError("Content hash mismatch, data tampered with!")
+        except SignatureMismatchError as e:
+            synapse.error_message = e
+        except ContentHashMismatchError as e:
+            synapse.error_message = e
+        except Exception as e:
+            synapse.error_message = "Unknown error occured."
+        finally:
+            # return the filled synapse
+            synapse.stored = stored
+            return synapse
 
     def retrieve( synapse: proof.protocol.Retrieve ) -> proof.protocol.Retrieve:
         if synapse.content_hash in self.registry:
@@ -181,6 +191,12 @@ def main( config ):
         # return the filled synapse
         return synapse
 
+    def get_size( synapse: proof.protocol.GetSize ) -> proof.protocol.GetSize:
+        # Fill values
+        synapse.size = len( self.registry )
+        # return the filled synapse
+        return synapse
+
     # Step 5: Build and link miner functions to the axon.
     # The axon handles request processing, allowing validators to send this process requests.
     axon = bt.axon( wallet = wallet )
@@ -189,14 +205,22 @@ def main( config ):
     # Attach determiners which functions are called when servicing a request.
     bt.logging.info(f"Attaching forward function to axon.")
     axon.attach(
-        forward_fn = dummy,
+        forward_fn = store,
+        blacklist_fn = blacklist_fn,
+        priority_fn = priority_fn,
+    ).attach(
+        forward_fn = retrieve,
+        blacklist_fn = blacklist_fn,
+        priority_fn = priority_fn,
+    ).attach(
+        forward_fn = get_size,
         blacklist_fn = blacklist_fn,
         priority_fn = priority_fn,
     )
 
     # Serve passes the axon information to the network + netuid we are hosting on.
     # This will auto-update if the axon port of external ip have changed.
-    bt.logging.info(f"Serving axon {dummy} on network: {config.subtensor.chain_endpoint} with netuid: {config.netuid}")
+    bt.logging.info(f"Serving axon {store} on network: {config.subtensor.chain_endpoint} with netuid: {config.netuid}")
     axon.serve( netuid = config.netuid, subtensor = subtensor )
 
     # Start  starts the miner's axon, making it active on the network.

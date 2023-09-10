@@ -29,7 +29,7 @@ import traceback
 import bittensor as bt
 
 # import this repo
-import template
+import proofnet
 
 
 # Step 2: Set up the configuration parser
@@ -113,15 +113,27 @@ def main( config ):
     # Step 7: The Main Validation Loop
     bt.logging.info("Starting validator loop.")
     step = 0
+    registry_size = 0
     while True:
         try:
+            # Broadcast a query to all miners on the network.
+            sizes = dendrite.query(
+                # Send the query to all axons in the network.
+                metagraph.axons,
+                # Construct a dummy query.
+                proofnet.protocol.GetSize(), # Get the current size of the registry.
+                # All responses have the deserialize function called on them before returning.
+                deserialize = True,
+            )
+            maxsize = max(sizes)
+            random_indices = torch.randint( 0, maxsize, maxsize )
             # TODO(developer): Define how the validator selects a miner to query, how often, etc.
             # Broadcast a query to all miners on the network.
             responses = dendrite.query(
                 # Send the query to all axons in the network.
                 metagraph.axons,
                 # Construct a dummy query.
-                template.protocol.Dummy( dummy_input = step ), # Construct a dummy query.
+                proofnet.protocl.Retrieve( registry_indices = random_indices ), # Construct a dummy query.
                 # All responses have the deserialize function called on them before returning.
                 deserialize = True, 
             )
