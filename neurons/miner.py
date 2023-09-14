@@ -27,6 +27,7 @@ import argparse
 import traceback
 import bittensor as bt
 from copy import deepcopy
+from typing import Union, Tuple, List, Dict, Optional
 
 # import this repo
 import proofnet.cryptography as cryptography
@@ -108,7 +109,7 @@ def main( config ):
     # Step 4: Set up miner functionalities
     # The following functions control the miner's response to incoming requests.
     # The blacklist function decides if a request should be ignored.
-    def blacklist_fn( synapse: template.protocol.Dummy ) -> bool:
+    def blacklist_fn( synapse: Union[protocol.Retrieve, protocol.Store] ) -> bool:
         # TODO(developer): Define how miners should blacklist requests. This Function 
         # Runs before the synapse data has been deserialized (i.e. before synapse.data is available).
         # The synapse is instead contructed via the headers of the request. It is important to blacklist
@@ -128,7 +129,7 @@ def main( config ):
 
     # The priority function determines the order in which requests are handled.
     # More valuable or higher-priority requests are processed before others.
-    def priority_fn( synapse: template.protocol.Dummy ) -> float:
+    def priority_fn( synapse: Union[protocol.Retrieve, protocol.Store] ) -> float:
         # TODO(developer): Define how miners should prioritize requests.
         # Miners may recieve messages from multiple entities at once. This function
         # determines which request should be processed first. Higher values indicate
@@ -141,17 +142,25 @@ def main( config ):
         priority = 0.0
         return prirority
 
-    def store( synapse: proof.protocol.Store ) -> proof.protocol.Store:
+    def store( synapse: protocol.Store ) -> protocol.Store:
         # Check content_hash against the content
         local_content_hash = cryptography.hash( synapse.content )
+        bt.logging.debug(f"Synapse content: {synapse.content}")
+        bt.logging.debug(f"Synapse content hash: {synapse.content_hash}")
+        bt.logging.debug(f"Local content hash: {local_content_hash}")
+        stored = False
         try:
             # If it matches, check the signature against the pubkey
             if synapse.content_hash == local_content_hash:
+                bt.logging.debug(f"Local content hash matches synapse content hash.")
                 if cryptography.verify( synapse.content, synapse.signature, synapse.pubkey ):
                     # # If it matches, generate a signature of the content signed with the miner key
                     # store the content has as key and the (miner_signature, pubkey) pairs in the database
                     miner_signature, miner_pubkey = cryptography.sign_content_with_new_keypair( synapse.content_hash )
                     self.registry[ synapse.content_hash ] = ( miner_signature, miner_pubkey )
+                    bt.logging.debug(f"Stored content hash: {synapse.content_hash}")
+                    bt.logging.debug(f"Stored miner signature: {miner_signature}")
+                    bt.logging.debug(f"Stored miner pubkey: {miner_pubkey}")
                     stored = True
                     # Optimistically store (no need to send back the signature until verify step)
                 else:
@@ -173,7 +182,7 @@ def main( config ):
             synapse.stored = stored
             return synapse
 
-    def retrieve( synapse: proof.protocol.Retrieve ) -> proof.protocol.Retrieve:
+    def retrieve( synapse: protocol.Retrieve ) -> protocol.Retrieve:
         registry_indices = synapse.registry_indices ^ len( self.registry ) % len( registry )
         hashes = np.asarray(list(self.registry))
         miner_data = {}
@@ -183,6 +192,7 @@ def main( config ):
                 hash_i = hashes[index]
             except:
                 miner_data[ hash_i ] = ( None, None ) # not found in registry.
+                continue
             # Retrive the miner signature and pubkey from the registry
             miner_signature, miner_pubkey = self.registry[ hash_i ]
             miner_data[ hash_i ] = ( miner_signature, miner_pubkey )
@@ -204,10 +214,6 @@ def main( config ):
         priority_fn = priority_fn,
     ).attach(
         forward_fn = retrieve,
-        blacklist_fn = blacklist_fn,
-        priority_fn = priority_fn,
-    ).attach(
-        forward_fn = get_size,
         blacklist_fn = blacklist_fn,
         priority_fn = priority_fn,
     )

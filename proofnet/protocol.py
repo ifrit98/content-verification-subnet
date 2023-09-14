@@ -1,7 +1,6 @@
 # The MIT License (MIT)
 # Copyright © 2023 Yuma Rao
-# TODO(developer): Set your name
-# Copyright © 2023 <your name>
+# Copyright © 2023 philanthrope
 
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
 # documentation files (the “Software”), to deal in the Software without restriction, including without limitation
@@ -26,7 +25,7 @@ class Store(bt.Synapse):
         validate_assignment = True
 
     def deserialize(self) -> bool:
-        return self.stored
+        return self
 
     # Query values
     content: Optional[object] = pydantic.Field(..., allow_mutation=False)
@@ -41,12 +40,12 @@ class Retrieve(bt.Synapse):
     class Config:
         validate_assignment = True
 
-    def deserialize(self) -> List[Dict[str, Tuple(str, str)]]:
+    def deserialize(self) -> List[Dict[str, Tuple[str, str]]]:
         return self.miner_data
 
     # Query values
     registry_indices: List[int] = pydantic.Field(..., allow_mutation=False)
 
     # Return values
-    miner_data: Optional[List[Dict[str, Tuple(str, str)]]] = {}
+    miner_data: Optional[List[Dict[str, Tuple[str, str]]]] = {}
 
