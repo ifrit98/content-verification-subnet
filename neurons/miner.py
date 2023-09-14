@@ -157,11 +157,11 @@ def main( config ):
                 else:
                     # If it doesn't match, return an error. Attempted to store invalid content.
                     stored = False
-                    raise SignatureMismatchError("Signature is not valid with provided pubkey!")
+                    raise SignatureMismatchError( "Signature is not valid with provided pubkey!" )
             else:
                 # If it doesn't match, return an error.
                 stored = False
-                raise ContentHashMismatchError("Content hash mismatch, data tampered with!")
+                raise ContentHashMismatchError( "Content hash mismatch, data tampered with!" )
         except SignatureMismatchError as e:
             synapse.error_message = e
         except ContentHashMismatchError as e:
@@ -174,26 +174,20 @@ def main( config ):
             return synapse
 
     def retrieve( synapse: proof.protocol.Retrieve ) -> proof.protocol.Retrieve:
-        if synapse.content_hash in self.registry:
-            # If the content has is in the database, check the signature against the pubkey
-            miner_signature, miner_pubkey = self.registry[ synapse.content_hash ]
-            in_registry = True
-        else:
-            # If it isn't, return 
-            miner_signature = None
-            miner_pubkey = None
-            in_registry = False
-        # Fill values
-        # TODO: Validator will use this to verify after receiving the filled synapse
-        synapse.miner_signature = miner_signature
-        synapse.miner_pubkey = miner_pubkey
-        synapse.in_registry = in_registry
-        # return the filled synapse
-        return synapse
-
-    def get_size( synapse: proof.protocol.GetSize ) -> proof.protocol.GetSize:
-        # Fill values
-        synapse.size = len( self.registry )
+        registry_indices = synapse.registry_indices ^ len( self.registry ) % len( registry )
+        hashes = np.asarray(list(self.registry))
+        miner_data = {}
+        for index in registry_indices:
+            # Attempt to extract the hash from the registry (if it exists)
+            try:
+                hash_i = hashes[index]
+            except:
+                miner_data[ hash_i ] = ( None, None ) # not found in registry.
+            # Retrive the miner signature and pubkey from the registry
+            miner_signature, miner_pubkey = self.registry[ hash_i ]
+            miner_data[ hash_i ] = ( miner_signature, miner_pubkey )
+        # Fill the synapse with the miner signatures and pubkeys
+        synapse.miner_data = miner_data
         # return the filled synapse
         return synapse
 

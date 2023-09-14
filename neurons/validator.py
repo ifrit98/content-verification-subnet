@@ -37,10 +37,10 @@ import proofnet
 def get_config():
 
     parser = argparse.ArgumentParser()
-    # TODO(developer): Adds your custom validator arguments to the parser.
-    parser.add_argument('--custom', default='my_custom_value', help='Adds a custom value to the parser.')
-    # Adds override arguments for network and netuid.
     parser.add_argument( '--netuid', type = int, default = 1, help = "The chain subnet uid." )
+    parser.add_argument( '--max_random_index_size', type = int, default = 1000, help = "The maximum number of random indices to query." )
+    parser.add_argument( '--random_query_size', type = int, default = 10, help = "The number of random elements from miner registries to query." )
+    parser.add_argument( '--alpha', type = float, default = 0.9, help = "The exponential decay rate for the score." )
     # Adds subtensor specific arguments i.e. --subtensor.chain_endpoint ... --subtensor.network ...
     bt.subtensor.add_args(parser)
     # Adds logging specific arguments i.e. --logging.debug ..., --logging.trace .. or --logging.logging_dir ...
@@ -106,28 +106,20 @@ def main( config ):
 
     # Step 6: Set up initial scoring weights for validation
     bt.logging.info("Building validation weights.")
-    alpha = 0.9
-    scores = torch.ones_like(metagraph.S, dtype=torch.float32)
-    bt.logging.info(f"Weights: {scores}")
+    alpha = config.alpha
+    scores = torch.ones_like( metagraph.S, dtype=torch.float32 )
+    bt.logging.info(f"Weights: { scores }")
 
     # Step 7: The Main Validation Loop
     bt.logging.info("Starting validator loop.")
     step = 0
-    registry_size = 0
+    max_size = config.max_random_index_size
+    index_size = config.random_query_size
+
     while True:
         try:
             # Broadcast a query to all miners on the network.
-            sizes = dendrite.query(
-                # Send the query to all axons in the network.
-                metagraph.axons,
-                # Construct a dummy query.
-                proofnet.protocol.GetSize(), # Get the current size of the registry.
-                # All responses have the deserialize function called on them before returning.
-                deserialize = True,
-            )
-            maxsize = max(sizes)
-            random_indices = torch.randint( 0, maxsize, maxsize )
-            # TODO(developer): Define how the validator selects a miner to query, how often, etc.
+            random_indices = torch.randint( 0, maxsize, index_size )
             # Broadcast a query to all miners on the network.
             responses = dendrite.query(
                 # Send the query to all axons in the network.
@@ -139,18 +131,27 @@ def main( config ):
             )
 
             # Log the results for monitoring purposes.
-            bt.logging.info(f"Received dummy responses: {responses}")
+            bt.logging.info(f"Received responses: { responses }")
 
-            # TODO(developer): Define how the validator scores responses.
             # Adjust the scores based on responses from miners.
-            for i, resp_i in enumerate(responses):
+            for i, resp_i in enumerate( responses ):
                 # Initialize the score for the current miner's response.
                 score = 0
+                # Iterate over all responses from the current miner and verify they are valid.
+                for hash_i, ( signature, pubkey ) in resp_i.miner_data.items():
+                    # If the miner returned None(s), it's highly likely it is not storing the correct data.
+                    if signature == None or pubkey == None:
+                        continue
+                    # Verify the signature of the response.
+                    # This ensures that the miner has the private key associated with the public key they
+                    # provided and that they stored the content they claimed to have stored.
+                    if not proofnet.cryptography.verify( hash_i, signature, pubkey ):
+                        # If the signature is invalid, log the error and continue to the next response.
+                        bt.logging.error(f"Invalid signature for response: { resp_i }")
+                        continue
 
-                # Check if the miner has provided the correct response by doubling the dummy input.
-                # If correct, set their score for this round to 1.
-                if resp_i == step * 2:
-                    score = 1
+                    # If the signature and hash are valid, increment the score.
+                    score += 1
 
                 # Update the global score of the miner.
                 # This score contributes to the miner's weight in the network.
@@ -158,8 +159,8 @@ def main( config ):
                 scores[i] = alpha * scores[i] + (1 - alpha) * score
 
             # Periodically update the weights on the Bittensor blockchain.
-            if (step + 1) % 2 == 0:
-                # TODO(developer): Define how the validator normalizes scores before setting weights.
+            if (step + 1) % 25 == 0:
+                # Define how the validator normalizes scores before setting weights.
                 weights = torch.nn.functional.normalize(scores, p=1.0, dim=0)
                 bt.logging.info(f"Setting weights: {weights}")
                 # This is a crucial step that updates the incentive mechanism on the Bittensor blockchain.
